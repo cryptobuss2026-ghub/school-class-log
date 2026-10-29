@@ -1,0 +1,155 @@
+{
+  "name": "Weekly Teacher Log Report to Headmistress",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "5 0 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "n1",
+      "name": "Sunday 00:05 Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// EDIT THIS LIST: one entry per class section. Paste each Google Sheet ID.\n// 'section' must match the label used in the Streamlit app's secrets.toml.\nconst sections = [\n  { section: 'Grade 1 - Sec A', sheetId: 'PASTE_SHEET_ID' },\n  { section: 'Grade 1 - Sec B', sheetId: 'PASTE_SHEET_ID' },\n  { section: 'Grade 2 - Sec A', sheetId: 'PASTE_SHEET_ID' },\n  { section: 'Grade 2 - Sec B', sheetId: 'PASTE_SHEET_ID' },\n];\nreturn sections.map(s => ({ json: s }));"
+      },
+      "id": "n2",
+      "name": "Define Sections",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Log",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "n3",
+      "name": "Read Section Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the weekly HTML digest, grouped by Grade & Section.\nconst tz = 'Asia/Karachi';\n// Trigger runs just after midnight on Sunday; step back so we still land in Saturday's ISO week.\nconst ref = $now.setZone(tz).minus({ minutes: 30 });\nconst week = ref.toFormat(\"kkkk-'W'WW\");          // matches the app's label, e.g. 2026-W41\nconst esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');\n\nconst sections = $('Define Sections').all().map(i => i.json.section);\nconst grouped = {};\nfor (const it of $input.all()) {\n  const row = it.json;\n  if (!row['Timestamp'] || row['Week Number'] !== week) continue;   // current-week filter\n  const p = it.pairedItem;\n  const idx = typeof p === 'number' ? p : Array.isArray(p) ? p[0].item : p?.item;\n  const label = sections[idx] ?? 'Unknown section';\n  (grouped[label] = grouped[label] || []).push(row);\n}\n\nlet html = `<div style=\"font-family:Arial,sans-serif;max-width:800px\">\n<h2>Weekly Class Log Report - ${week}</h2>\n<p>Generated ${ref.toFormat('cccc, dd LLL yyyy')} (Asia/Karachi)</p>`;\n\nfor (const label of Object.keys(grouped).sort()) {\n  const rows = grouped[label].sort((a,b) => String(a['Timestamp']).localeCompare(String(b['Timestamp'])));\n  html += `<h3 style=\"background:#f0f4f8;padding:6px 10px;margin-top:24px\">${esc(label)}</h3>\n<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;width:100%;font-size:14px\">\n<tr style=\"background:#fafafa\"><th align=\"left\">Teacher</th><th align=\"left\">Subject</th><th align=\"left\">Topics / Lessons Taught</th></tr>`;\n  for (const r of rows) {\n    html += `<tr><td valign=\"top\">${esc(r['Teacher Name'])}</td><td valign=\"top\">${esc(r['Subject'])}</td><td>${esc(r['Topics / Lessons Taught'])}</td></tr>`;\n  }\n  html += '</table>';\n}\n\nconst missing = sections.filter(s => !grouped[s]);\nif (missing.length) {\n  html += `<h3 style=\"color:#b00020;margin-top:24px\">No submissions this week</h3><ul>${missing.map(m => `<li>${esc(m)}</li>`).join('')}</ul>`;\n}\nhtml += '</div>';\n\nreturn [{ json: { subject: `Weekly Class Log Report - ${week}`, html } }];"
+      },
+      "id": "n4",
+      "name": "Build HTML Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "headmistress@example.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "n5",
+      "name": "Email Headmistress",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Sunday 00:05 Trigger": {
+      "main": [
+        [
+          {
+            "node": "Define Sections",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define Sections": {
+      "main": [
+        [
+          {
+            "node": "Read Section Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Section Log": {
+      "main": [
+        [
+          {
+            "node": "Build HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Email Headmistress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi"
+  }
+}
